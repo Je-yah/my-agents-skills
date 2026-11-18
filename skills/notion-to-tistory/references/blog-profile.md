@@ -20,10 +20,17 @@
 
 형식: `[Prefix] 제목` — 기존 글 관행.
 
-기존 어휘: `[Troubleshooting]` `[Agent]` `[Toy Project]` `[Encoding]` `[Research]` `[Career]` `[Identity]`
-활동 유형 확장: `[Hackathon]` `[Project]` `[Conference]` `[Study]` `[Retrospective]`
+prefix는 카테고리와 함께 고른다. 아래 대응을 기본으로 한다.
+
+| Prefix | 기본 카테고리 |
+|---|---|
+| `[Troubleshooting]` `[Project]` `[Toy Project]` `[Agent]` | Devlog |
+| `[Hackathon]` `[Conference]` `[Retrospective]` `[Career]` `[Identity]` | 회고 |
+| `[Research]` | Paper Review |
+| `[Encoding]` `[Study]` | CS |
 
 - 기존 어휘에 맞는 것이 있으면 기존 어휘를 우선 사용한다.
+- prefix의 기본 카테고리와 2번 분류 결과가 다르면 분류 결과를 우선하고 그 이유를 한 줄 남긴다.
 - 제목은 콜론으로 부제를 나눌 수 있다. 예: `[Encoding] 텍스트 인코딩: ASCII부터 유니코드 심화까지`
 
 ## 태그 어휘
@@ -52,7 +59,10 @@
 
 `post.md` 구조:
 - 본문만 담는다(제목은 meta.md에). INTRO/MAIN/OUTRO 헤딩 포함.
-- 이미지 삽입 위치는 마커로 표시: `<!-- image: images/NN.png | <대체텍스트> -->`
+- 이미지 삽입 위치는 마커로 표시하며, 출처를 반드시 명시한다.
+  - 노션 원본 이미지: `<!-- image: images/NN.png | <대체텍스트> | source: notion:<원본 URL> -->`
+  - 생성 삽화: `<!-- image: images/NN.png | <대체텍스트> | source: generate | prompt: <영문 프롬프트> -->`
+- `NN`은 본문 등장 순서대로 01부터 연속 부여한다. 특정 삽화 생성이 실패(exit 3)해도 번호는 그대로 두고 그 마커만 "생성 실패" 주석으로 남긴다.
 - 썸네일 마커는 본문에 넣지 않는다(티스토리 대표 이미지로 별도 지정).
 
 `meta.md` 필드:

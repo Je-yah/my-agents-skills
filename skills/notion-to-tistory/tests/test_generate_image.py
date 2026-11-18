@@ -29,6 +29,13 @@ def test_get_api_key_found(monkeypatch):
     assert generate_image.get_api_key() == "test-key"
 
 
+def test_get_api_key_empty_value(monkeypatch):
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _completed(0, "\n"))
+    with pytest.raises(SystemExit) as e:
+        generate_image.get_api_key()
+    assert e.value.code == 2
+
+
 def test_build_request_contains_prompt_and_aspect():
     req = generate_image.build_request("로봇 삽화", "16:9")
     assert req["contents"][0]["parts"][0]["text"] == "로봇 삽화"
@@ -48,15 +55,59 @@ def test_extract_image_bytes_no_image():
     assert e.value.code == 3
 
 
-def test_main_writes_file(tmp_path, monkeypatch):
-    out = tmp_path / "thumb.png"
+def _ok_body():
     data = base64.b64encode(b"png-bytes").decode()
-    body = json.dumps(
+    return json.dumps(
         {"candidates": [{"content": {"parts": [{"inlineData": {"mimeType": "image/png", "data": data}}]}}]}
     ).encode()
+
+
+def test_main_writes_file(tmp_path, monkeypatch):
+    out = tmp_path / "thumb.png"
     monkeypatch.setattr(generate_image, "get_api_key", lambda: "test-key")
     monkeypatch.setattr(
-        generate_image.urllib.request, "urlopen", lambda *a, **k: io.BytesIO(body)
+        generate_image.urllib.request, "urlopen", lambda *a, **k: io.BytesIO(_ok_body())
     )
     assert generate_image.main(["--prompt", "로봇 삽화", "--out", str(out)]) == 0
     assert out.read_bytes() == b"png-bytes"
+
+
+def test_main_creates_parent_dir(tmp_path, monkeypatch):
+    out = tmp_path / "nested" / "images" / "01.png"
+    monkeypatch.setattr(generate_image, "get_api_key", lambda: "test-key")
+    monkeypatch.setattr(
+        generate_image.urllib.request, "urlopen", lambda *a, **k: io.BytesIO(_ok_body())
+    )
+    assert generate_image.main(["--prompt", "x", "--out", str(out)]) == 0
+    assert out.read_bytes() == b"png-bytes"
+
+
+def test_main_http_error_exits_4(tmp_path, monkeypatch):
+    import urllib.error
+
+    out = tmp_path / "t.png"
+    monkeypatch.setattr(generate_image, "get_api_key", lambda: "bad-key")
+
+    def _raise(*a, **k):
+        raise urllib.error.HTTPError("url", 400, "Bad Request", {}, io.BytesIO(b"{}"))
+
+    monkeypatch.setattr(generate_image.urllib.request, "urlopen", _raise)
+    with pytest.raises(SystemExit) as e:
+        generate_image.main(["--prompt", "x", "--out", str(out)])
+    assert e.value.code == 4
+    assert not out.exists()
+
+
+def test_main_url_error_exits_4(tmp_path, monkeypatch):
+    import urllib.error
+
+    out = tmp_path / "t.png"
+    monkeypatch.setattr(generate_image, "get_api_key", lambda: "k")
+
+    def _raise(*a, **k):
+        raise urllib.error.URLError("timed out")
+
+    monkeypatch.setattr(generate_image.urllib.request, "urlopen", _raise)
+    with pytest.raises(SystemExit) as e:
+        generate_image.main(["--prompt", "x", "--out", str(out)])
+    assert e.value.code == 4

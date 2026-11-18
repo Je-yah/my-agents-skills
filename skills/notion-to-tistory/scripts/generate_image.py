@@ -3,8 +3,10 @@
 import argparse
 import base64
 import json
+import os
 import subprocess
 import sys
+import urllib.error
 import urllib.request
 
 API_URL = (
@@ -15,21 +17,26 @@ KEYCHAIN_SERVICE = "GEMINI_API_KEY"
 
 
 def get_api_key() -> str:
-    result = subprocess.run(
-        ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
+    try:
+        result = subprocess.run(
+            ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except subprocess.TimeoutExpired:
+        result = None
+    key = result.stdout.strip() if result and result.returncode == 0 else ""
+    if not key:
         print(
-            "Keychain에 GEMINI_API_KEY가 없습니다.\n"
+            "Keychain에 유효한 GEMINI_API_KEY가 없습니다.\n"
             "1. https://aistudio.google.com/apikey 에서 키를 발급하세요.\n"
             "2. 다음 명령으로 등록하세요 (키는 입력 프롬프트에 붙여넣기):\n"
             "   security add-generic-password -s GEMINI_API_KEY -a gemini -w",
             file=sys.stderr,
         )
         raise SystemExit(2)
-    return result.stdout.strip()
+    return key
 
 
 def build_request(prompt: str, aspect: str) -> dict:
@@ -43,12 +50,17 @@ def build_request(prompt: str, aspect: str) -> dict:
 
 
 def extract_image_bytes(response: dict) -> bytes:
+    texts = []
     for candidate in response.get("candidates", []):
         for part in candidate.get("content", {}).get("parts", []):
             inline = part.get("inlineData")
             if inline and inline.get("data"):
                 return base64.b64decode(inline["data"])
-    print("응답에 이미지가 없습니다(세이프티 차단 또는 텍스트만 반환).", file=sys.stderr)
+            if part.get("text"):
+                texts.append(part["text"])
+    reason = response.get("promptFeedback", {}).get("blockReason", "")
+    detail = reason or " ".join(texts) or "원인 불명"
+    print(f"응답에 이미지가 없습니다(차단/텍스트만 반환): {detail}", file=sys.stderr)
     raise SystemExit(3)
 
 
@@ -64,10 +76,23 @@ def main(argv: list[str]) -> int:
         data=json.dumps(build_request(args.prompt, args.aspect)).encode(),
         headers={"Content-Type": "application/json", "x-goog-api-key": get_api_key()},
     )
-    with urllib.request.urlopen(request, timeout=120) as response:
-        body = json.load(response)
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            body = json.load(response)
+    except urllib.error.HTTPError as e:
+        hint = {400: "요청 오류(프롬프트 확인)", 403: "키 권한/만료 확인", 429: "쿼터 초과"}.get(
+            e.code, ""
+        )
+        print(f"Gemini API 오류 HTTP {e.code} {e.reason} {hint}".strip(), file=sys.stderr)
+        raise SystemExit(4)
+    except urllib.error.URLError as e:
+        print(f"Gemini API 연결 실패(네트워크·타임아웃): {e.reason}", file=sys.stderr)
+        raise SystemExit(4)
 
     image = extract_image_bytes(body)
+    parent = os.path.dirname(args.out)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
     with open(args.out, "wb") as f:
         f.write(image)
     print(args.out)
