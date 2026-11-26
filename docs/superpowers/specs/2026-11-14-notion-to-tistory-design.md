@@ -34,7 +34,6 @@
 ## Non-goals
 
 - 티스토리 자동 로그인·자동 게시 (브라우저 자동화 — 접근 B, 추후 확장 과제)
-- Notion MCP 없이 공개 링크만으로 읽기 (notion.site는 JS 렌더링이라 WebFetch로 본문 읽기 불가 — 2026-11-14 실측 확인)
 - Claude Code 외 다른 harness(Codex 등) 지원
 - 블로그 카테고리 신설·개편
 
@@ -67,7 +66,7 @@
 
 작성자(Claude) 판단 (수정 가능):
 - 스킬 이름 `notion-to-tistory`, 위치 `~/.skills/skills/notion-to-tistory/` (my-agents-skills 레포)
-- 노션 읽기: Notion MCP(`notion-fetch`)에 게시 링크 전달 — MCP 필수. 미연결 시 명확한 오류 안내 후 중단 (WebFetch fallback은 실측 결과 동작하지 않아 제거)
+- 노션 읽기: **메인은 REST API**(`scripts/fetch_notion.py`, Notion 비공식 `loadPageChunk`) — 공개 게시 페이지를 MCP 없이 읽는다(2026-11-26 실측: 토큰 없이 HTTP 200, recordMap 파싱으로 title·blocks·gray·images 추출). 비공개 페이지는 Notion MCP(`notion-fetch`) 폴백. 둘 다 불가 시 게시·연결 안내 후 중단. WebFetch는 notion.site JS 렌더링으로 본문을 못 읽어 사용 안 함.
 - 하네스 범위: Claude Code 전용
 - 이미지 생성: Gemini 이미지 API(`gemini-2.5-flash-image`) — 사용자 확정(2026-11-14). 키는 Keychain에 `GEMINI_API_KEY` 서비스명으로 저장 후 `security find-generic-password`로 조회, 생성 스크립트는 스킬 내 `scripts/generate_image.py`. 키 미등록 상태에서는 이미지 단계에서 발급·등록 안내 후 중단
 - 출력 위치 `~/Documents/BlogPackages/` (Notes 보호 경로 회피)
