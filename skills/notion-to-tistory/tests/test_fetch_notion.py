@@ -75,6 +75,11 @@ def test_rich_text_non_gray_color_not_flagged():
     assert gray is False
 
 
+def test_rich_text_empty_run_no_crash():
+    # 신규-3: 빈 run [[]]에서 IndexError 없이 안전 처리
+    assert fetch_notion.rich_text([[]]) == ("", False)
+
+
 def test_parse_record_map_blocks_ordered_with_gray():
     out = fetch_notion.parse_record_map(FIXTURE, "root")
     assert out["title"] == "My Talk"
@@ -141,6 +146,30 @@ def test_fetch_page_merges_chunks(monkeypatch):
     merged = fetch_notion.fetch_page("pid")
     blocks = merged["recordMap"]["block"]
     assert set(blocks) == {"a", "b"}
+    assert merged["chunk_capped"] is False
+
+
+def test_fetch_page_cap_sets_flag(monkeypatch):
+    # 신규-1: cursor가 계속 남으면 MAX_CHUNKS 상한에서 chunk_capped=True로 유실을 알린다
+    always_more = {"recordMap": {"block": {}}, "cursor": {"stack": [[{"id": "x"}]]}}
+    monkeypatch.setattr(fetch_notion, "fetch_chunk", lambda pid, cur, n: always_more)
+    merged = fetch_notion.fetch_page("pid")
+    assert merged["chunk_capped"] is True
+
+
+def test_main_truncated_from_cap(monkeypatch, capsys):
+    # 신규-2: 청크 상한 유실이 최종 출력 truncated에 반영된다
+    pid = "41fea2e0-bab9-8080-bd35-d3c700e4212c"
+    capped = {"recordMap": {"block": {
+        pid: _blk({"id": pid, "type": "page",
+                   "properties": {"title": [["T"]]}, "content": ["a"]}),
+        "a": _blk({"id": "a", "type": "text", "properties": {"title": [["A"]]}}),
+    }}, "chunk_capped": True}
+    monkeypatch.setattr(fetch_notion, "fetch_page", lambda p: capped)
+    out = "/Users/User/.claude/jobs/4ba89716/tmp/cap_out.json"
+    rc = fetch_notion.main(["--url", "https://x/t-41fea2e0bab98080bd35d3c700e4212c", "--out", out])
+    assert rc == 0
+    assert json.load(open(out))["truncated"] is True
 
 
 def test_main_outputs_json(monkeypatch, capsys):

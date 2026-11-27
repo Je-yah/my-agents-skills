@@ -45,6 +45,8 @@ def rich_text(title_prop) -> tuple:
         return "", False
     parts, gray = [], False
     for run in title_prop:
+        if not run:  # 빈 run([]) 방어
+            continue
         parts.append(run[0])
         anns = run[1] if len(run) > 1 else []
         for a in anns:
@@ -127,13 +129,15 @@ def fetch_page(page_id: str) -> dict:
     """C3: cursor가 남아있는 동안 청크를 모두 가져와 recordMap.block을 병합."""
     merged = {}
     cursor = {"stack": []}
+    capped = True  # break로 끝나면 False, 상한 소진 시 True 유지
     for chunk_number in range(MAX_CHUNKS):
         data = fetch_chunk(page_id, cursor, chunk_number)
         merged.update(data.get("recordMap", {}).get("block", {}))
         cursor = data.get("cursor") or {"stack": []}
         if not cursor.get("stack"):
+            capped = False
             break
-    return {"recordMap": {"block": merged}}
+    return {"recordMap": {"block": merged}, "chunk_capped": capped}
 
 
 def main(argv) -> int:
@@ -145,6 +149,7 @@ def main(argv) -> int:
     page_id = extract_page_id(args.url)
     data = fetch_page(page_id)
     result = parse_record_map(data, page_id)
+    result["truncated"] = result["truncated"] or data.get("chunk_capped", False)
     if result["truncated"]:
         print("경고: 일부 블록을 가져오지 못했습니다(페이지 뒷부분 유실 가능).", file=sys.stderr)
     text = json.dumps(result, ensure_ascii=False, indent=2)
