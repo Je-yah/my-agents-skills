@@ -45,7 +45,7 @@
 ## 제약
 
 - 티스토리 Open API는 2024-02 종료 → 게시는 수동 붙여넣기 패키지로만
-- 이미지 생성 API 키는 macOS Keychain에서 조회 (plaintext 저장 금지)
+- 이미지 생성은 무료 서비스(Pollinations.ai) 사용, 키·결제 불필요
 - 산출물·블로그 글은 한국어, 기존 블로그 문체 유지
 
 ## 검토한 접근
@@ -68,9 +68,9 @@
 - 스킬 이름 `notion-to-tistory`, 위치 `~/.skills/skills/notion-to-tistory/` (my-agents-skills 레포)
 - 노션 읽기: **메인은 REST API**(`scripts/fetch_notion.py`, Notion 비공식 `loadPageChunk`) — 공개 게시 페이지를 MCP 없이 읽는다(2026-11-26 실측: 토큰 없이 HTTP 200, recordMap 파싱으로 title·blocks·gray·images 추출). 비공개 페이지는 Notion MCP(`notion-fetch`) 폴백. 둘 다 불가 시 게시·연결 안내 후 중단. WebFetch는 notion.site JS 렌더링으로 본문을 못 읽어 사용 안 함.
 - 하네스 범위: Claude Code 전용
-- 이미지 생성: Gemini 이미지 API(`gemini-2.5-flash-image`) — 사용자 확정(2026-11-14). 키는 Keychain에 `GEMINI_API_KEY` 서비스명으로 저장 후 `security find-generic-password`로 조회, 생성 스크립트는 스킬 내 `scripts/generate_image.py`. 키 미등록 상태에서는 이미지 단계에서 발급·등록 안내 후 중단
+- 이미지 생성: **Pollinations.ai**(무료, 키 불필요) — `scripts/generate_image.py`가 `https://image.pollinations.ai/prompt/<prompt>?width=&height=&nologo=true`로 GET. 2026-11-27 전환: 당초 Gemini `gemini-2.5-flash-image`였으나 무료 티어 이미지 쿼터가 `limit: 0`(유료 전용)이라 429 → 사용자 요청으로 무료 백엔드 교체. 품질 업그레이드 필요 시 `fetch_image` 엔드포인트만 HF FLUX 등으로 교체 가능(토큰 필요).
 - 출력 위치 `~/Documents/BlogPackages/` (Notes 보호 경로 회피)
-- 파이프라인: 읽기 → 분류 → 초안 집필 → 사용자 초안 승인 → 이미지 생성(비용 발생 단계이므로 승인 후) → 패키지 출력
+- 파이프라인: 읽기 → 분류 → 초안 집필 → 사용자 초안 승인 → 이미지 생성(내용 검토 후) → 패키지 출력
 - 삽화 스타일: 깔끔한 플랫 일러스트, 글당 본문 삽화 기본 2~3장 (섹션 수에 따라 조정)
 
 ## 빌더에게 남기는 것

@@ -1,95 +1,52 @@
-"""Gemini API로 블로그 썸네일·삽화를 생성한다. 표준 라이브러리만 사용."""
+"""Pollinations.ai(무료, 키 불필요)로 블로그 썸네일·삽화를 생성한다. 표준 라이브러리만 사용.
+
+무료 커뮤니티 서비스라 키·결제가 필요 없다. 품질을 더 원하면 fetch_image의
+엔드포인트만 다른 제공자(예: Hugging Face)로 교체하면 된다.
+"""
 
 import argparse
-import base64
-import json
 import os
-import subprocess
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
-API_URL = (
-    "https://generativelanguage.googleapis.com/v1beta/"
-    "models/gemini-2.5-flash-image:generateContent"
-)
-KEYCHAIN_SERVICE = "GEMINI_API_KEY"
+BASE = "https://image.pollinations.ai/prompt/"
+# 종횡비 → (width, height). Pollinations가 환경에 따라 근사 조정할 수 있으나 비율은 유지된다.
+ASPECT = {"16:9": (1280, 720), "1:1": (1024, 1024), "4:3": (1024, 768)}
 
 
-def get_api_key() -> str:
+def build_image_url(prompt: str, aspect: str) -> str:
+    w, h = ASPECT[aspect]
+    path = urllib.parse.quote(prompt, safe="")
+    return f"{BASE}{path}?width={w}&height={h}&nologo=true"
+
+
+def fetch_image(url: str) -> bytes:
     try:
-        result = subprocess.run(
-            ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"],
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-    except subprocess.TimeoutExpired:
-        result = None
-    key = result.stdout.strip() if result and result.returncode == 0 else ""
-    if not key:
-        print(
-            "Keychain에 유효한 GEMINI_API_KEY가 없습니다.\n"
-            "1. https://aistudio.google.com/apikey 에서 키를 발급하세요.\n"
-            "2. 다음 명령으로 등록하세요 (키는 입력 프롬프트에 붙여넣기):\n"
-            "   security add-generic-password -s GEMINI_API_KEY -a gemini -w",
-            file=sys.stderr,
-        )
-        raise SystemExit(2)
-    return key
-
-
-def build_request(prompt: str, aspect: str) -> dict:
-    return {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "responseModalities": ["IMAGE"],
-            "imageConfig": {"aspectRatio": aspect},
-        },
-    }
-
-
-def extract_image_bytes(response: dict) -> bytes:
-    texts = []
-    for candidate in response.get("candidates", []):
-        for part in candidate.get("content", {}).get("parts", []):
-            inline = part.get("inlineData")
-            if inline and inline.get("data"):
-                return base64.b64decode(inline["data"])
-            if part.get("text"):
-                texts.append(part["text"])
-    reason = response.get("promptFeedback", {}).get("blockReason", "")
-    detail = reason or " ".join(texts) or "원인 불명"
-    print(f"응답에 이미지가 없습니다(차단/텍스트만 반환): {detail}", file=sys.stderr)
-    raise SystemExit(3)
-
-
-def main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(description="Gemini 이미지 생성")
-    parser.add_argument("--prompt", required=True, help="이미지 설명")
-    parser.add_argument("--out", required=True, help="출력 PNG 경로")
-    parser.add_argument("--aspect", default="16:9", choices=["16:9", "1:1", "4:3"])
-    args = parser.parse_args(argv)
-
-    request = urllib.request.Request(
-        API_URL,
-        data=json.dumps(build_request(args.prompt, args.aspect)).encode(),
-        headers={"Content-Type": "application/json", "x-goog-api-key": get_api_key()},
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=120) as response:
-            body = json.load(response)
+        with urllib.request.urlopen(url, timeout=120) as resp:
+            ctype = resp.headers.get("Content-Type", "")
+            data = resp.read()
     except urllib.error.HTTPError as e:
-        hint = {400: "요청 오류(프롬프트 확인)", 403: "키 권한/만료 확인", 429: "쿼터 초과"}.get(
-            e.code, ""
-        )
-        print(f"Gemini API 오류 HTTP {e.code} {e.reason} {hint}".strip(), file=sys.stderr)
+        print(f"이미지 생성 API 오류 HTTP {e.code} {e.reason}", file=sys.stderr)
         raise SystemExit(4)
     except urllib.error.URLError as e:
-        print(f"Gemini API 연결 실패(네트워크·타임아웃): {e.reason}", file=sys.stderr)
+        print(f"이미지 생성 API 연결 실패(네트워크·타임아웃): {e.reason}", file=sys.stderr)
         raise SystemExit(4)
+    if not ctype.startswith("image/"):
+        print(f"이미지가 반환되지 않았습니다(Content-Type: {ctype or '없음'}).", file=sys.stderr)
+        raise SystemExit(3)
+    return data
 
-    image = extract_image_bytes(body)
+
+def main(argv) -> int:
+    parser = argparse.ArgumentParser(description="Pollinations 이미지 생성")
+    parser.add_argument("--prompt", required=True, help="이미지 설명(영문 권장)")
+    parser.add_argument("--out", required=True, help="출력 이미지 경로")
+    parser.add_argument("--aspect", default="16:9", choices=list(ASPECT))
+    args = parser.parse_args(argv)
+
+    image = fetch_image(build_image_url(args.prompt, args.aspect))
     parent = os.path.dirname(args.out)
     if parent:
         os.makedirs(parent, exist_ok=True)
