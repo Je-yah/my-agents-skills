@@ -109,13 +109,70 @@ def test_fetch_image_402_persists_exits_4(monkeypatch):
     assert e.value.code == 4
 
 
-def test_fetch_image_http_error_exits_4(monkeypatch):
-    def _raise(*a, **k):
-        raise urllib.error.HTTPError("u", 500, "err", {}, io.BytesIO(b""))
-    monkeypatch.setattr(generate_image.urllib.request, "urlopen", _raise)
+def test_retry_seconds_clamped_to_max():
+    # HIGH: 외부 body의 비정상적으로 큰 Retry after 값을 상한으로 clamp
+    err = urllib.error.HTTPError(
+        "u", 402, "x", {}, io.BytesIO(b'{"message":"Retry after 99999s"}'))
+    assert generate_image._retry_seconds(err) == generate_image.RETRY_MAX
+
+
+def test_fetch_image_402_then_non_image_exits_3(monkeypatch):
+    # MEDIUM: 402 대기 후 재시도 응답이 비이미지면 깨진 파일 저장 없이 exit 3
+    calls = {"n": 0}
+
+    def fake(*a, **k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise urllib.error.HTTPError(
+                "u", 402, "x", {}, io.BytesIO(b'{"message":"Retry after 1s"}'))
+        return FakeResp(b"<html>loading</html>", "image/jpeg")
+
+    monkeypatch.setattr(generate_image.urllib.request, "urlopen", fake)
+    monkeypatch.setattr(generate_image.time, "sleep", lambda s: None)
+    with pytest.raises(SystemExit) as e:
+        generate_image.fetch_image("https://x")
+    assert e.value.code == 3
+
+
+def test_fetch_image_5xx_retries_then_succeeds(monkeypatch):
+    # 503 등 일시 서버 오류는 짧게 대기 후 재시도
+    calls = {"n": 0}
+
+    def fake(*a, **k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise urllib.error.HTTPError("u", 503, "Service Unavailable", {}, io.BytesIO(b""))
+        return FakeResp(JPEG, "image/jpeg")
+
+    monkeypatch.setattr(generate_image.urllib.request, "urlopen", fake)
+    monkeypatch.setattr(generate_image.time, "sleep", lambda s: None)
+    assert generate_image.fetch_image("https://x") == JPEG
+    assert calls["n"] == 2
+
+
+def test_fetch_image_5xx_persists_exits_4(monkeypatch):
+    def always_503(*a, **k):
+        raise urllib.error.HTTPError("u", 503, "Service Unavailable", {}, io.BytesIO(b""))
+    monkeypatch.setattr(generate_image.urllib.request, "urlopen", always_503)
+    monkeypatch.setattr(generate_image.time, "sleep", lambda s: None)
     with pytest.raises(SystemExit) as e:
         generate_image.fetch_image("https://x")
     assert e.value.code == 4
+
+
+def test_fetch_image_4xx_non_402_exits_4_no_retry(monkeypatch):
+    # 400 등 비일시 4xx는 재시도 없이 즉시 exit 4
+    calls = {"n": 0}
+
+    def fake(*a, **k):
+        calls["n"] += 1
+        raise urllib.error.HTTPError("u", 400, "Bad Request", {}, io.BytesIO(b""))
+
+    monkeypatch.setattr(generate_image.urllib.request, "urlopen", fake)
+    with pytest.raises(SystemExit) as e:
+        generate_image.fetch_image("https://x")
+    assert e.value.code == 4
+    assert calls["n"] == 1
 
 
 def test_fetch_image_url_error_exits_4(monkeypatch):

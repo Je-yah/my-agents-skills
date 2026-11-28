@@ -19,6 +19,8 @@ BASE = "https://image.pollinations.ai/prompt/"
 ASPECT = {"16:9": (1280, 720), "1:1": (1024, 1024), "4:3": (1024, 768)}
 MAX_BYTES = 20 * 1024 * 1024  # 비정상적으로 큰 응답 방어
 RETRY_DEFAULT = 46  # 레이트리밋 기본 대기(초) — '45초에 1장'보다 약간 여유
+RETRY_MAX = 120  # 외부 body가 지시하는 대기값 상한(비정상/악의적 값으로 무한정지 방지)
+TRANSIENT_WAIT = 5  # 5xx 일시 오류 재시도 전 대기(초)
 
 
 def build_image_url(prompt: str, aspect: str) -> str:
@@ -42,18 +44,23 @@ def _retry_seconds(err: urllib.error.HTTPError) -> int:
     except Exception:
         body = ""
     m = re.search(r"Retry after (\d+)s", body)
-    return int(m.group(1)) + 1 if m else RETRY_DEFAULT
+    val = int(m.group(1)) + 1 if m else RETRY_DEFAULT
+    return min(val, RETRY_MAX)  # 외부 값은 상한 clamp
 
 
-def fetch_image(url: str, _max_attempts: int = 2) -> bytes:
+def fetch_image(url: str, _max_attempts: int = 3) -> bytes:
     for attempt in range(_max_attempts):
+        last = attempt == _max_attempts - 1
         try:
             with urllib.request.urlopen(url, timeout=120) as resp:
                 ctype = resp.headers.get("Content-Type", "")
                 data = resp.read(MAX_BYTES + 1)
         except urllib.error.HTTPError as e:
-            if e.code == 402 and attempt < _max_attempts - 1:  # 무료 티어 레이트리밋 → 대기 후 재시도
+            if e.code == 402 and not last:  # 무료 티어 레이트리밋 → 지시된 시간만큼 대기 후 재시도
                 time.sleep(_retry_seconds(e))
+                continue
+            if e.code >= 500 and not last:  # 일시 서버 오류(과부하 등) → 짧게 대기 후 재시도
+                time.sleep(TRANSIENT_WAIT)
                 continue
             print(f"이미지 생성 API 오류 HTTP {e.code} {e.reason}", file=sys.stderr)
             raise SystemExit(4)
